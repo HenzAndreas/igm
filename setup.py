@@ -12,13 +12,12 @@ def package_files(directory):
             paths.append(os.path.join('..', path, filename))
     return paths
 
-
 with open('README.md', 'r') as f:
     readme = f.read()
     
 setup(
     name="igm-model",
-    version="2.0.3",
+    version="2.0.4",
     author="Guillaume Jouvet",
     author_email="guillaume.jouvet@unil.ch",
     url="https://github.com/jouvetg/igm",
