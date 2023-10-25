@@ -89,11 +89,12 @@ def initialize_load_ncdf(params, state):
 
     # coarsen if requested
     if params.lncd_coarsen> 1:
-        xx = x[:: params.lncd_coarsen]
-        yy = y[:: params.lncd_coarsen]
+        coarsen_middle = int(params.lncd_coarsen/2) # this is to make sure that the coarsening is done in the middle of the new grid cells
+        xx = x[coarsen_middle:: params.lncd_coarsen]
+        yy = y[coarsen_middle:: params.lncd_coarsen]
         for var in nc.variables:
             if (not var in ["x", "y"]) & (vars()[var].ndim==2):
-                vars()[var] = vars()[var][:: params.lncd_coarsen,:: params.lncd_coarsen]
+                vars()[var] = vars()[var][coarsen_middle:: params.lncd_coarsen,coarsen_middle:: params.lncd_coarsen]
 #                vars()[var] = RectBivariateSpline(y, x, vars()[var])(yy, xx) # does not work
         x = xx
         y = yy

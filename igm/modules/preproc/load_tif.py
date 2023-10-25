@@ -66,12 +66,13 @@ def initialize_load_tif(params, state):
             
     # coarsen if requested
     if params.ltif_coarsen > 1:
-        xx = x[:: params.ltif_coarsen]
-        yy = y[:: params.ltif_coarsen]
+        coarsen_middle = int(params.ltif_coarsen/2) # this is to make sure that the coarsening is done in the middle of the new grid cells
+        xx = x[coarsen_middle:: params.ltif_coarsen]
+        yy = y[coarsen_middle:: params.ltif_coarsen]
         for file in files:
             var = os.path.split(file)[-1].split(".")[0]
             if (not var in ["x", "y"]) & (vars()[var].ndim==2):
-                vars()[var] = vars()[var][:: params.ltif_coarsen,:: params.ltif_coarsen]
+                vars()[var] = vars()[var][coarsen_middle:: params.ltif_coarsen,coarsen_middle:: params.ltif_coarsen]
 #                vars()[var] = RectBivariateSpline(y, x, vars()[var])(yy, xx) # does not work
         x = xx
         y = yy
