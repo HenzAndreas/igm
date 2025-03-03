@@ -6,6 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow as tf
 import time
+from igm.modules.utils import compute_gradient_tf
 
 
 def params(parser):
@@ -27,6 +28,11 @@ def params(parser):
 def initialize(params, state):
     state.tcomp_avalanche = []
     state.tlast_avalanche = tf.Variable(params.time_start, dtype=tf.float32)
+    
+    state.new_avalanche = False
+
+
+    
 
 
 def update(params, state):
@@ -36,74 +42,105 @@ def update(params, state):
 
         state.tcomp_avalanche.append(time.time())
 
-        H = state.thk
-        Zb = state.topg
-        Zi = Zb + H
-        dHRepose = state.dx * tf.math.tan(
-            params.avalanche_angleOfRepose * np.pi / 180.0
-        )
-        Ho = tf.maximum(H, 0)
 
-        count = 0
+        
+        if state.new_avalanche:
+            
+            angleOfRepose = tf.Variable(params.avalanche_angleOfRepose/180*np.pi, dtype=tf.float32)
+            
+            # calculate the gradient of the surface
+            dzdx, dzdy = compute_gradient_tf(state.usurf, state.dx, state.dx)
+        
+            # save arrows of direction down
+        
+            # calculate the gradient of the surface
+            grad = tf.math.sqrt(dzdx**2 + dzdy**2)
+            # where to move ice
+            grad = tf.where(grad < angleOfRepose, 0, grad)
+            grad = tf.where(state.thk < 0.1, 0, grad)
+        
 
-        while True:
-            count += 1
+        
+            print("what now?")
+        
+        if not state.new_avalanche:
 
-            dZidx_down = tf.pad(
-                tf.maximum(Zi[:, 1:] - Zi[:, :-1], 0), [[0, 0], [1, 0]], "CONSTANT"
+
+            H = state.thk
+            Zb = state.topg
+            Zi = Zb + H
+            # angle of repose, and the maximum angle of the slope that is allowed
+            dHRepose = state.dx * tf.math.tan(
+                params.avalanche_angleOfRepose * np.pi / 180.0
             )
-            dZidx_up = tf.pad(
-                tf.maximum(Zi[:, :-1] - Zi[:, 1:], 0), [[0, 0], [0, 1]], "CONSTANT"
-            )
-            dZidx = tf.maximum(dZidx_down, dZidx_up)
+            Ho = tf.maximum(H, 0)
 
-            dZidy_left = tf.pad(
-                tf.maximum(Zi[1:, :] - Zi[:-1, :], 0), [[1, 0], [0, 0]], "CONSTANT"
-            )
-            dZidy_right = tf.pad(
-                tf.maximum(Zi[:-1, :] - Zi[1:, :], 0), [[0, 1], [0, 0]], "CONSTANT"
-            )
-            dZidy = tf.maximum(dZidy_right, dZidy_left)
+            count = 0
 
-            grad = tf.math.sqrt(dZidx**2 + dZidy**2)
-            gradT = dZidy_left + dZidy_right + dZidx_down + dZidx_up
-            gradT = tf.where(gradT == 0, 1, gradT)
-            grad = tf.where(Ho < 0.1, 0, grad)
+            while True:
+                count += 1
 
-            mxGrad = tf.reduce_max(grad)
-            if mxGrad <= 1.1 * dHRepose:
-                break
+                dZidx_down = tf.concat([tf.zeros_like(Zi[:, :1]), tf.maximum(Zi[:, 1:] - Zi[:, :-1], 0)], axis=1)
+                dZidx_up = tf.concat([tf.maximum(Zi[:, :-1] - Zi[:, 1:], 0), tf.zeros_like(Zi[:, :1])], axis=1)
+                dZidx = tf.maximum(dZidx_down, dZidx_up)
 
-            delH = tf.maximum(0, (grad - dHRepose) / 3.0)
+                dZidy_left = tf.concat([tf.zeros_like(Zi[:1, :]), tf.maximum(Zi[1:, :] - Zi[:-1, :], 0)], axis=0)
+                dZidy_right = tf.concat([tf.maximum(Zi[:-1, :] - Zi[1:, :], 0), tf.zeros_like(Zi[:1, :])], axis=0)
+                dZidy = tf.maximum(dZidy_right, dZidy_left)
 
-            Htmp = Ho
-            Ho = tf.maximum(0, Htmp - delH)
-            delH = Htmp - Ho
+                # the gradient of the surface (slope basically)
+                grad = tf.math.sqrt(dZidx**2 + dZidy**2)
+                
+                
+                gradT = dZidy_left + dZidy_right + dZidx_down + dZidx_up
+                gradT = tf.where(gradT == 0, 1, gradT)
+                
+                # do not calculate outside the glacier:
+                grad = tf.where(Ho < 0.1, 0, grad)
 
-            delHup = tf.pad(
-                delH[:, :-1] * dZidx_up[:, :-1] / gradT[:, :-1],
-                [[0, 0], [1, 0]],
-                "CONSTANT",
-            )
-            delHdn = tf.pad(
-                delH[:, 1:] * dZidx_down[:, 1:] / gradT[:, 1:],
-                [[0, 0], [0, 1]],
-                "CONSTANT",
-            )
-            delHrt = tf.pad(
-                delH[:-1, :] * dZidy_right[:-1, :] / gradT[:-1, :],
-                [[1, 0], [0, 0]],
-                "CONSTANT",
-            )
-            delHlt = tf.pad(
-                delH[1:, :] * dZidy_left[1:, :] / gradT[1:, :],
-                [[0, 1], [0, 0]],
-                "CONSTANT",
-            )
+                mxGrad = tf.reduce_max(grad)
+                if mxGrad <= 1.1 * dHRepose:
+                    break
 
-            Ho = tf.maximum(0, Ho + delHdn + delHup + delHlt + delHrt)
+                # the amount of ice that should be redistributed
+                delH = tf.maximum(0, (grad - dHRepose) / 3.0)
 
-            Zi = Zb + Ho
+                Htmp = Ho
+                Ho = tf.maximum(0, Htmp - delH)
+                delH = Htmp - Ho
+
+                # # save delH
+                # fig, ax = plt.subplots(figsize=(5,5))
+                # plt.imshow(delH,origin='lower'); plt.colorbar()
+                # plt.savefig("figures/delH_" + str(count) + ".png")
+                # plt.close()
+
+                # calculate the amount of ice that should be moved in each direction
+                delHup = tf.pad(
+                    delH[:, :-1] * dZidx_up[:, :-1] / gradT[:, :-1],
+                    [[0, 0], [1, 0]],
+                    "CONSTANT",
+                )
+                delHdn = tf.pad(
+                    delH[:, 1:] * dZidx_down[:, 1:] / gradT[:, 1:],
+                    [[0, 0], [0, 1]],
+                    "CONSTANT",
+                )
+                delHrt = tf.pad(
+                    delH[:-1, :] * dZidy_right[:-1, :] / gradT[:-1, :],
+                    [[1, 0], [0, 0]],
+                    "CONSTANT",
+                )
+                
+                delHlt = tf.pad(
+                    delH[1:, :] * dZidy_left[1:, :] / gradT[1:, :],
+                    [[0, 1], [0, 0]],
+                    "CONSTANT",
+                )
+
+                Ho = tf.maximum(0, Ho + delHdn + delHup + delHlt + delHrt)
+
+                Zi = Zb + Ho
 
         # print(count)
 
