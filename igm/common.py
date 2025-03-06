@@ -50,7 +50,13 @@ def params_core() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         conflict_handler="resolve",
     )  # automatically overrides repeated/older parameters! Valid solution?
-
+    
+    parser.add_argument(
+        "--modules_custom_folder",
+        type=str,
+        default="custom_modules",
+        help="Folder containing custom modules (default: %(default)s)",
+    )
     parser.add_argument(
         "--param_file",
         type=str,
@@ -343,10 +349,10 @@ def load_modules_from_directory(
                 try:
                     module = importlib.import_module(module_name)
                 except ModuleNotFoundError:
-                    module = importlib.import_module("modules_custom." + module_name)
+                    module = importlib.import_module(f"{params.modules_custom_folder}.{module_name}")
             except ModuleNotFoundError:
                 raise ModuleNotFoundError(
-                    f"Can not find module {module_name}. Make sure it is either in the 1) {Path(igm.__file__).parent}/modules/{module_folder} directory or 2) in your current working directory."
+                    f"Can not find module {module_name}. Make sure it is either in the 1) {Path(igm.__file__).parent}/modules/{module_folder} directory or 2) in your current working directory, which is: {os.getcwd()}"
                 )
 
         validate_module(module)
