@@ -6,7 +6,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow as tf
 import time
-from igm.modules.utils import compute_gradient_tf
 
 
 def params(parser):
@@ -23,16 +22,18 @@ def params(parser):
         default=30,
         help="Angle of repose (30°)",
     )
+    
+    parser.add_argument(
+        "--aval_stop_redistribution_thk",
+        type=float,
+        default=0.02,
+        help="Stop redistribution if the mean thickness is below this value (m) over the whole grid",
+    )
 
 
 def initialize(params, state):
     state.tcomp_avalanche = []
     state.tlast_avalanche = tf.Variable(params.time_start, dtype=tf.float32)
-    
-    state.new_avalanche = False
-
-
-    
 
 
 def update(params, state):
@@ -42,105 +43,126 @@ def update(params, state):
 
         state.tcomp_avalanche.append(time.time())
 
-
+        H = state.thk
+        Zb = state.topg
+        Zi = Zb + H
         
-        if state.new_avalanche:
+        # the elevation difference of the cells that is considered to be stable
+        dHRepose = state.dx * tf.math.tan(
+            params.avalanche_angleOfRepose * np.pi / 180.0
+        )
+        Ho = tf.maximum(H, 0)
+
+        count = 0
+        # volume redistributed
+        # volumes = []
+        
+
+        while True:
+            count += 1
             
-            angleOfRepose = tf.Variable(params.avalanche_angleOfRepose/180*np.pi, dtype=tf.float32)
-            
-            # calculate the gradient of the surface
-            dzdx, dzdy = compute_gradient_tf(state.usurf, state.dx, state.dx)
-        
-            # save arrows of direction down
-        
-            # calculate the gradient of the surface
-            grad = tf.math.sqrt(dzdx**2 + dzdy**2)
-            # where to move ice
-            grad = tf.where(grad < angleOfRepose, 0, grad)
-            grad = tf.where(state.thk < 0.1, 0, grad)
-        
+            # find out, in which direction is down (instead of doing normal gradients, we do the max of the two directions)
 
-        
-            print("what now?")
-        
-        if not state.new_avalanche:
-
-
-            H = state.thk
-            Zb = state.topg
-            Zi = Zb + H
-            # angle of repose, and the maximum angle of the slope that is allowed
-            dHRepose = state.dx * tf.math.tan(
-                params.avalanche_angleOfRepose * np.pi / 180.0
+            dZidx_down = tf.pad(
+                tf.maximum(Zi[:, 1:] - Zi[:, :-1], 0), [[0, 0], [1, 0]], "CONSTANT"
             )
-            Ho = tf.maximum(H, 0)
+            dZidx_up = tf.pad(
+                tf.maximum(Zi[:, :-1] - Zi[:, 1:], 0), [[0, 0], [0, 1]], "CONSTANT"
+            )
+            dZidx = tf.maximum(dZidx_down, dZidx_up)
 
-            count = 0
+            dZidy_left = tf.pad(
+                tf.maximum(Zi[1:, :] - Zi[:-1, :], 0), [[1, 0], [0, 0]], "CONSTANT"
+            )
+            dZidy_right = tf.pad(
+                tf.maximum(Zi[:-1, :] - Zi[1:, :], 0), [[0, 1], [0, 0]], "CONSTANT"
+            )
+            dZidy = tf.maximum(dZidy_right, dZidy_left)
 
-            while True:
-                count += 1
+            grad = tf.math.sqrt(dZidx**2 + dZidy**2)
+            gradT = dZidy_left + dZidy_right + dZidx_down + dZidx_up
+            gradT = tf.where(gradT == 0, 1, gradT) # avoid devide by zero error, but actually everything below 1 makes the volume to go up if divided later.. 
+            grad = tf.where(Ho < 0.1, 0, grad)
 
-                dZidx_down = tf.concat([tf.zeros_like(Zi[:, :1]), tf.maximum(Zi[:, 1:] - Zi[:, :-1], 0)], axis=1)
-                dZidx_up = tf.concat([tf.maximum(Zi[:, :-1] - Zi[:, 1:], 0), tf.zeros_like(Zi[:, :1])], axis=1)
-                dZidx = tf.maximum(dZidx_down, dZidx_up)
+            mxGrad = tf.reduce_max(grad)
+            if mxGrad <= 1.1 * dHRepose:
+                break
 
-                dZidy_left = tf.concat([tf.zeros_like(Zi[:1, :]), tf.maximum(Zi[1:, :] - Zi[:-1, :], 0)], axis=0)
-                dZidy_right = tf.concat([tf.maximum(Zi[:-1, :] - Zi[1:, :], 0), tf.zeros_like(Zi[:1, :])], axis=0)
-                dZidy = tf.maximum(dZidy_right, dZidy_left)
+            delH = tf.maximum(0, (grad - dHRepose) / 3.0)
 
-                # the gradient of the surface (slope basically)
-                grad = tf.math.sqrt(dZidx**2 + dZidy**2)
+            # ============ ANDREAS ADDED ===========
+            # if there is less than 1 m to redesitribute, just redistribute the remaining thickness and stop afterwards
+            # print(count, np.max(delH), np.sum(delH) / (np.shape(H)[0]*np.shape(H)[1]))
+            mean_thickness = np.sum(delH) / (np.shape(H)[0]*np.shape(H)[1])
+            
+            if mean_thickness < params.aval_stop_redistribution_thk:
+                # for a last time, use all the thickness to redistribute and then stop
+                delH = tf.maximum(0, grad - dHRepose)
+                count = 2000
                 
+            # volumes.append(np.sum(delH) / (np.shape(H)[0]*np.shape(H)[1]))                
+            # ================================
                 
-                gradT = dZidy_left + dZidy_right + dZidx_down + dZidx_up
-                gradT = tf.where(gradT == 0, 1, gradT)
-                
-                # do not calculate outside the glacier:
-                grad = tf.where(Ho < 0.1, 0, grad)
 
-                mxGrad = tf.reduce_max(grad)
-                if mxGrad <= 1.1 * dHRepose:
-                    break
 
-                # the amount of ice that should be redistributed
-                delH = tf.maximum(0, (grad - dHRepose) / 3.0)
+            Htmp = Ho
+            Ho = tf.maximum(0, Htmp - delH)
+            delH = Htmp - Ho
 
-                Htmp = Ho
-                Ho = tf.maximum(0, Htmp - delH)
-                delH = Htmp - Ho
+            # The thickness that is redistributed to the neighboring cells based on the fraction of if it should be up, down, left or right (dZidx_**/gradT)
+            delHup = tf.pad(
+                delH[:, :-1] * dZidx_up[:, :-1] / gradT[:, :-1],
+                [[0, 0], [1, 0]],
+                "CONSTANT",
+            )
+            delHdn = tf.pad(
+                delH[:, 1:] * dZidx_down[:, 1:] / gradT[:, 1:],
+                [[0, 0], [0, 1]],
+                "CONSTANT",
+            )
+            delHrt = tf.pad(
+                delH[:-1, :] * dZidy_right[:-1, :] / gradT[:-1, :],
+                [[1, 0], [0, 0]],
+                "CONSTANT",
+            )
+            delHlt = tf.pad(
+                delH[1:, :] * dZidy_left[1:, :] / gradT[1:, :],
+                [[0, 1], [0, 0]],
+                "CONSTANT",
+            )
+            
+            
+            # calculate new thickness after distribution ensuring that the thickness is always positive
+            Ho = tf.maximum(0, Ho + delHdn + delHup + delHlt + delHrt)
 
-                # # save delH
-                # fig, ax = plt.subplots(figsize=(5,5))
-                # plt.imshow(delH,origin='lower'); plt.colorbar()
-                # plt.savefig("figures/delH_" + str(count) + ".png")
-                # plt.close()
-
-                # calculate the amount of ice that should be moved in each direction
-                delHup = tf.pad(
-                    delH[:, :-1] * dZidx_up[:, :-1] / gradT[:, :-1],
-                    [[0, 0], [1, 0]],
-                    "CONSTANT",
-                )
-                delHdn = tf.pad(
-                    delH[:, 1:] * dZidx_down[:, 1:] / gradT[:, 1:],
-                    [[0, 0], [0, 1]],
-                    "CONSTANT",
-                )
-                delHrt = tf.pad(
-                    delH[:-1, :] * dZidy_right[:-1, :] / gradT[:-1, :],
-                    [[1, 0], [0, 0]],
-                    "CONSTANT",
-                )
-                
-                delHlt = tf.pad(
-                    delH[1:, :] * dZidy_left[1:, :] / gradT[1:, :],
-                    [[0, 1], [0, 0]],
-                    "CONSTANT",
-                )
-
-                Ho = tf.maximum(0, Ho + delHdn + delHup + delHlt + delHrt)
-
-                Zi = Zb + Ho
+            Zi = Zb + Ho
+            
+            # ============ ANDREAS ADDED ===========
+            # exit loop if the number of iterations is too high
+            if count > 300:
+                break
+            
+        # save volumes as txt
+        # np.savetxt(f'figures-redistributed-snow/volumes_{state.t.numpy()}.txt', volumes)
+        
+        # fig,ax = plt.subplots(1,1,figsize=(10,10))
+        # # plot volumes and count
+        # ax.plot(volumes)
+        # ax.set_xlabel('Iteration')
+        # ax.set_ylabel('Mean thickness redistributed (over the whole grid)')
+        
+        # # calculate the volumes of snow redistributed
+        # volumes = np.array(volumes) * np.mean(state.dx**2) * np.shape(H)[0] * np.shape(H)[0] / 1000**3
+        # # add second axis
+        # ax2 = ax.twinx()
+        # ax2.plot(volumes, color='red')
+        # ax2.set_ylabel('Volume redistributed (km³)')
+        
+        # # plot horizontal line at 0.01
+        # ax.axhline(y=0.01, color='black', linestyle='--')
+        
+        # plt.savefig(f'figures-redistributed-snow/one-year-volumes_{state.t.numpy()}.png')
+        # plt.close()
 
         # print(count)
 

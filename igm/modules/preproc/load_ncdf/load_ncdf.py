@@ -144,6 +144,9 @@ def initialize(params, state):
     nc.close()
 
     complete_data(state)
+    
+    # print the size of the data
+    print("Size of the data:",state.topg.shape)
 
 
 def update(params, state):

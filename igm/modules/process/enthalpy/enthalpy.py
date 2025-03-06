@@ -128,7 +128,7 @@ def params(parser):
     )
     
     parser.add_argument(
-        "--temperature_offset_air_to_ice",
+        "--enth_temperature_offset_air_to_ice",
         type=float,
         default=0.0,
         help="This is the offset between the air temperature and the ice temperature as records show \
@@ -198,7 +198,7 @@ def update(params, state):
 
     # compute the surface temperature taken the negative part of the mean air temperature
     surftemp = (
-        tf.minimum(tf.math.reduce_mean(state.air_temp + params.temperature_offset_air_to_ice, axis=0), 0)
+        tf.minimum(tf.math.reduce_mean(state.air_temp + params.enth_temperature_offset_air_to_ice, axis=0), 0)
         + params.enth_melt_temp
     )  # [K]
 
