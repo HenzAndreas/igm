@@ -101,6 +101,7 @@ def test_params_core():
         "saved_params_filename": "params_saved",
         "url_data": "",
         "folder_data": "data",
+        "modules_custom_folder": "custom_modules",  # Andreas H added
     }
 
 # def test_params_core_overwrite():
