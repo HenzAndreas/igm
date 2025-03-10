@@ -125,7 +125,6 @@ def update(params, state):
                 "CONSTANT",
             )
             
-            
             # calculate new thickness after distribution ensuring that the thickness is always positive
             Ho = tf.maximum(0, Ho + delHdn + delHup + delHlt + delHrt)
 
