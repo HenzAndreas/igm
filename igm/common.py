@@ -54,7 +54,7 @@ def params_core() -> argparse.ArgumentParser:
     parser.add_argument(
         "--modules_custom_folder",
         type=str,
-        default="custom_modules",
+        default="modules_custom",
         help="Folder containing custom modules (default: %(default)s)",
     )
     parser.add_argument(
