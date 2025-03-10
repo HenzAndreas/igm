@@ -52,6 +52,8 @@ def initialize_iceflow_emulator(params,state):
                 print(
                     "Found pretrained emulator in the igm package: " + direct_name
                 )
+                # save in params_saved the name of the loaded emulator
+                params.iflo_emulator = direct_name
             else:
                 print("No pretrained emulator found in the igm package")
         else:
@@ -295,7 +297,7 @@ def _split_into_patches(X, nbmax):
 
 
 def save_iceflow_model(params, state):
-    directory = "iceflow-model"
+    directory = "iceflow-model-Henz"
     
     import shutil
 
