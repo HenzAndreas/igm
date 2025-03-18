@@ -21,6 +21,13 @@ def params(parser):
         default="output.nc",
         help="Output ncdf data file",
     )
+    
+    parser.add_argument(
+        "--wncd_compress_nc", # change to compress nc file
+        type=bool,
+        default=False,
+        help="Compress the output ncdf file",
+    )
 
     parser.add_argument(
         "--wncd_vars_to_save",
@@ -186,4 +193,33 @@ def update(params, state):
 
 
 def finalize(params, state):
-    pass
+    
+    # only tested on linux based systems
+    
+    import subprocess
+    if params.wncd_compress_nc:
+        # Define the paths to the .nc file and the compressed .nc file (not really necessary, but for clarity)
+        nc_file_path = params.wncd_output_file
+        compressed_nc_file_path = params.wncd_output_file[:-3] + "_compressed.nc"
+        
+        try:
+            # Run the ncks command to compress the .nc file, compression level 1 turned out to be the best opitimum between compression and speed
+            subprocess.run(
+                ['ncks', '-4', '-L', '1', '-O', nc_file_path, '-o', compressed_nc_file_path],
+                check=True
+            )
+            print(f"Successfully compressed {nc_file_path} to {compressed_nc_file_path}")
+
+            # Check if the compressed file was successfully created
+            if os.path.exists(compressed_nc_file_path):
+                # If the compressed file exists, delete the original .nc file
+                os.remove(nc_file_path)
+                print(f"Deleted original file: {nc_file_path}")
+            else:
+                print(f"Compression failed: {compressed_nc_file_path} not found")
+        
+        except subprocess.CalledProcessError as e:
+            print(f"Error occurred while compressing {nc_file_path}: {e}")
+    
+    else: # if no compression is required, just finish the function, like before
+        pass
