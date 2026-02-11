@@ -36,7 +36,7 @@ setup(
         "tensorflow-probability==0.23.0",
         "matplotlib",
         "scipy",
-        "netCDF4",
+        "netCDF4==1.6.0",
         "xarray",
         "rasterio",
         "pyproj",
